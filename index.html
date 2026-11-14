@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111416">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Flo">
+<title>Les aventures de Flo - Le Chevalier Noir</title>
+<style>
+  :root { --bg:#ece6d6; --fg:#2b2a24; --card:#fffdf6; --btn:#7a1f1f; --bar:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111416; --fg:#ece8da; --card:#23282a; --btn:#b33a3a; --bar:#ef5350; } }
+  * { box-sizing:border-box; }
+  html, body { margin:0; min-height:100%; }
+  body { background:var(--bg); color:var(--fg); font-family:system-ui, sans-serif; display:flex; flex-direction:column;
+         align-items:center; gap:8px; padding:10px 8px calc(12px + env(safe-area-inset-bottom,0px)); touch-action:manipulation; }
+  h1 { margin:0; font-size:1.15rem; text-align:center; }
+  #lvl { font-size:.85rem; opacity:.75; }
+  #hud { display:flex; flex-wrap:wrap; gap:4px 14px; justify-content:center; font-size:.95rem; }
+  canvas { border-radius:12px; max-width:100%; height:auto; box-shadow:0 4px 18px #0006; }
+  #log { min-height:3em; text-align:center; font-size:.9rem; max-width:400px; }
+  #pad { display:grid; grid-template-columns:repeat(3,66px); grid-template-rows:repeat(2,52px); gap:6px; }
+  #pad button { font-size:1.4rem; }
+  button { border:0; border-radius:10px; background:var(--btn); color:#fff; font-size:1rem; padding:10px 12px; }
+  button:disabled { opacity:.4; }
+  .ov { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; padding:16px; z-index:5; }
+  .ov.on { display:flex; }
+  .card { background:var(--card); border-radius:16px; padding:18px; width:100%; max-width:370px; text-align:center; }
+  .big { font-size:56px; line-height:1.1; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+  .bar { height:10px; background:#0003; border-radius:6px; overflow:hidden; margin:4px 0 8px; }
+  .bar i { display:block; height:100%; background:var(--bar); }
+  #mt { white-space:pre-line; margin:8px 0 14px; }
+  .shake { animation:sh .25s; } @keyframes sh { 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+</style>
+</head>
+<body>
+  <h1>⚔️ Les aventures de Flo<br>le Chevalier Noir</h1>
+  <div id="lvl"></div><button id="mu" style="padding:4px 12px">🔊</button>
+  <div id="hud"></div>
+  <canvas id="cv"></canvas>
+  <div id="log"></div>
+  <div id="pad">
+    <span></span><button data-d="0,-1">⬆️</button><span></span>
+    <button data-d="-1,0">⬅️</button><button data-d="0,1">⬇️</button><button data-d="1,0">➡️</button>
+  </div>
+
+  <div class="ov" id="fight"><div class="card" id="fc">
+    <div class="big" id="fe"></div>
+    <div id="fn"></div><div class="bar"><i id="fb"></i></div>
+    <div id="fh"></div>
+    <div class="row">
+      <button id="ba">⚔️ Attaquer</button><button id="bs">⚡ Spécial</button>
+      <button id="bp">🧪 Potion</button><button id="bf">🏃 Fuir</button>
+    </div>
+    <div id="fl" style="min-height:3em;font-size:.88rem"></div>
+  </div></div>
+
+  <div class="ov" id="sh"><div class="card">
+    <div class="big">🧑‍🌾</div><p>Marchand ambulant<br><b id="sg"></b></p>
+    <div class="row" id="sl"></div><button id="sx">Quitter</button>
+  </div></div>
+
+  <div class="ov" id="md"><div class="card">
+    <div class="big" id="mi"></div><p id="mt"></p><button id="mb"></button>
+  </div></div>
+
+<script>
+const T = 28;
+const $ = id => document.getElementById(id);
+const rand = n => Math.floor(Math.random() * n);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let AC, mute = false, fx = [];
+function snd(f, d = .12, type = "square", v = .05, f2) {
+  if (mute) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    if (AC.state === "suspended") AC.resume();
+    const o = AC.createOscillator(), g = AC.createGain(), n = AC.currentTime;
+    o.type = type; o.frequency.setValueAtTime(f, n);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, n + d);
+    g.gain.setValueAtTime(v, n); g.gain.exponentialRampToValueAtTime(.0001, n + d);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(n + d);
+  } catch (e) {}
+}
+const SFX = {
+  step: () => snd(90, .05, "triangle", .03),
+  hit: () => snd(260, .15, "sawtooth", .06, 70),
+  hurt: () => snd(150, .25, "square", .06, 40),
+  pick: () => { snd(660, .08); setTimeout(() => snd(990, .1), 70); },
+  buy: () => { snd(520, .07, "triangle"); setTimeout(() => snd(780, .1, "triangle"), 60); },
+  win: () => [523, 659, 784, 1046].forEach((n, i) => setTimeout(() => snd(n, .2, "triangle", .06), i * 120)),
+  lose: () => [330, 262, 196, 130].forEach((n, i) => setTimeout(() => snd(n, .25, "sawtooth", .05), i * 180))
+};
+const TINT = ["rgba(255,220,120,.10)","rgba(60,120,60,.18)","rgba(30,30,90,.25)","rgba(120,180,255,.16)","rgba(150,90,40,.16)","rgba(0,0,30,.2)","rgba(170,30,10,.2)"];
+function burst(x, y, col) { for (let i = 0; i < 10; i++) fx.push({ p:1, x:x*T+T/2, y:y*T+T/2, vx:Math.random()*3-1.5, vy:-Math.random()*2-.3, col, life:22 }); }
+function pop(x, y, txt, col) { fx.push({ x:x*T+T/2, y:y*T, txt, col, life:45 }); }
+function shake() { cv.classList.remove("shake"); void cv.offsetWidth; cv.classList.add("shake"); }
+
+const MON = {
+  bat:   { e:"🦇", n:"Chauve-souris", hp:7,  a:[1,3], g:4 },
+  wolf:  { e:"🐺", n:"Loup",          hp:10, a:[2,4], g:6 },
+  skel:  { e:"💀", n:"Squelette",     hp:14, a:[3,5], g:8 },
+  ghost: { e:"👻", n:"Fantôme",       hp:16, a:[3,5], g:10 },
+  orc:   { e:"👹", n:"Orc",           hp:22, a:[4,7], g:14, k:1 },
+  wraith:{ e:"🧛", n:"Spectre vampire",hp:24, a:[4,7], g:18, v:1 },
+  boss:  { e:"🐉", n:"Dragon gardien", hp:85, a:[6,11], g:150, k:1 }
+};
+const ICON = { sage:"🧙", chest:"🧰", potion:"🧪", portal:"🌀", jayne:"👸", shop:"🧑‍🌾" };
+
+const LV = [
+  { n:"La forêt maudite", e:"🌲", w:15, h:11, c:["#3d6b38","#376233"], d:"#5d9a4e", wall:["🌲","🌳"], mons:{bat:2,wolf:3}, need:2, trap:0, fog:0,
+    t:"La princesse Jayne a été enlevée par le dragon ! Flo, le Chevalier Noir, part la sauver.\nBrise le sceau du portail : trouve 2 runes 🔮 dans les coffres." },
+  { n:"Le marais brumeux", e:"🌿", w:17, h:11, c:["#4a5d3a","#445536"], d:"#6f8f4a", wall:["🌿","🪨"], mons:{wolf:2,skel:2,bat:2,ghost:1}, need:3, trap:4, fog:0,
+    t:"Le marais est plus vaste et plus dangereux. Des pièges ⚠️ sont cachés dans la boue.\nTrouve 3 runes 🔮." },
+  { n:"Le cimetière hanté", e:"🪦", w:17, h:13, c:["#3a3f4a","#343944"], d:"#59607a", wall:["🪦","🌲"], mons:{skel:3,ghost:3,bat:2,orc:1}, need:3, trap:5, fog:6.5,
+    t:"La nuit tombe : tu ne vois qu'autour de toi. Les morts se réveillent…\nTrouve 3 runes 🔮." },
+  { n:"La montagne gelée", e:"❄️", w:19, h:13, c:["#9db4c4","#92aabb"], d:"#e8f4fb", wall:["🏔️","❄️"], mons:{wolf:3,skel:2,orc:3,wraith:2}, need:4, trap:8, fog:6.5,
+    t:"Le blizzard hurle sur la montagne. Loups affamés et orcs des glaces rôdent.\nTrouve 4 runes 🔮." },
+  { n:"Les ruines maudites", e:"🏛️", w:21, h:13, c:["#5a5148","#524a41"], d:"#8a7d6c", wall:["🏛️","🪨"], mons:{orc:4,wraith:3,skel:3,ghost:3}, need:4, trap:10, fog:5.5,
+    t:"D'anciennes ruines, immenses et piégées. Les esprits y sont nombreux.\nTrouve 4 runes 🔮." },
+  { n:"Le donjon", e:"🏰", w:19, h:13, c:["#4a4650","#444049"], d:"#6a6573", wall:null, mons:{skel:3,orc:3,ghost:2,wraith:2}, need:4, trap:8, fog:5.5,
+    t:"Un labyrinthe de pierre, des orcs et des spectres qui draînent ta vie.\nTrouve 4 runes 🔮." },
+  { n:"La tour du dragon", e:"🔥", w:19, h:13, c:["#4a2f33","#442a2e"], d:"#7a4a3a", wall:null, mons:{orc:3,wraith:3,skel:2,ghost:2}, need:3, trap:9, fog:5, boss:1,
+    t:"Jayne est enfermée au sommet de la tour, gardée par le dragon.\nTrouve 3 runes 🔮 pour briser son sceau, puis affronte-le !" }
+];
+
+let lv, th, W, H, map, ents, G, f = null, busy = false;
+const sc = () => 1 + .12 * lv;
+
+function newGame() {
+  G = { x:1, y:1, hp:30, max:30, atk:4, def:0, gold:0, pot:2, runes:0, sage:0 };
+  startLevel(0);
+}
+
+function startLevel(i) {
+  lv = i; th = LV[i]; W = th.w; H = th.h;
+  cv.width = W * T; cv.height = H * T;
+  G.x = 1; G.y = 1; G.runes = 0; G.sage = 0;
+  gen(); hud(); say("");
+  modal(th.e, `Niveau ${i + 1} — ${th.n}\n\n${th.t}${lv ? "\n🧑‍🌾 Un marchand t'attend quelque part : dépense ton or !" : ""}`, "Partir à l'aventure", () => {});
+}
+
+function gen() {
+  const dens = .12 + .015 * lv;
+  for (;;) {
+    map = [];
+    for (let y = 0; y < H; y++) {
+      map[y] = [];
+      for (let x = 0; x < W; x++)
+        map[y][x] = (x == 0 || y == 0 || x == W-1 || y == H-1 || (Math.random() < dens && !(x < 3 && y < 3))) ? 1 : 0;
+    }
+    const used = new Set(["1,1"]); ents = [];
+    const put = (t, extra = {}, far = false) => {
+      let x, y, n = 0;
+      do { x = 1 + rand(W-2); y = 1 + rand(H-2); n++; }
+      while ((map[y][x] || used.has(x + "," + y) || (far && x < W / 2)) && n < 800);
+      used.add(x + "," + y);
+      const m = MON[t];
+      const hp = m ? Math.round(m.hp * (t === "boss" ? 1 : sc())) : 0;
+      ents.push({ t, x, y, hp, mx:hp, ...extra });
+    };
+    const extras = ["sword","shield","potion","gold"].sort(() => Math.random() - .5).slice(0, 2);
+    const loot = [...Array(th.need).fill("rune"), ...extras].sort(() => Math.random() - .5);
+    put("sage"); if (lv > 0) put("shop");
+    for (const t in th.mons) for (let k = 0; k < th.mons[t]; k++) put(t);
+    loot.forEach(l => put("chest", { loot:l }));
+    put("potion"); put("potion");
+    for (let k = 0; k < th.trap; k++) put("trap");
+    if (th.boss) put("boss", {}, true); else put("portal", {}, true);
+    if (reach()) return;
+  }
+}
+
+function reach() {
+  const seen = new Set(["1,1"]), q = [[1,1]];
+  while (q.length) {
+    const [x, y] = q.shift();
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = x + dx, ny = y + dy, k = nx + "," + ny;
+      if (map[ny] && map[ny][nx] === 0 && !seen.has(k)) { seen.add(k); q.push([nx, ny]); }
+    }
+  }
+  return ents.every(e => seen.has(e.x + "," + e.y));
+}
+
+/* ---------- Dessin ---------- */
+const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
+
+function knight(px, py, bob, face, leg) {
+  ctx.save(); ctx.translate(px, py + bob); ctx.scale(.8 * face, .8);
+  ctx.fillStyle = "#14161a"; ctx.fillRect(-6,10,5,6 + leg); ctx.fillRect(1,10,5,6 - leg);
+  ctx.fillStyle = "#6a1b1b";
+  ctx.beginPath(); ctx.moveTo(-8,-2); ctx.lineTo(8,-2); ctx.lineTo(11,12); ctx.lineTo(-11,12); ctx.fill();
+  ctx.fillStyle = "#1c1f25"; ctx.fillRect(-7,-2,14,12);
+  ctx.fillStyle = "#2e323b"; ctx.beginPath(); ctx.arc(0,-8,7.5,0,7); ctx.fill();
+  ctx.fillStyle = "#b71c1c"; ctx.fillRect(-1.5,-19,3,7);
+  ctx.fillStyle = "#9fb4c7"; ctx.fillRect(-5,-9.5,10,2.5);
+  ctx.fillStyle = "#cfd8dc"; ctx.fillRect(9,-12,2.5,16);
+  ctx.fillStyle = "#8d6e3f"; ctx.fillRect(7,3,7,2);
+  ctx.strokeStyle = "#5c6370"; ctx.lineWidth = 1; ctx.strokeRect(-7,-2,14,12);
+  ctx.restore();
+}
+
+function draw(t) {
+  if (!th) return;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = (T - 8) + "px serif";
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const px = x * T, py = y * T, h = hash(x, y);
+    ctx.fillStyle = th.c[(x + y) % 2]; ctx.fillRect(px, py, T, T);
+    ctx.fillStyle = th.d;
+    ctx.fillStyle = `rgba(0,0,0,${(h % 9) / 60})`; ctx.fillRect(px, py, T, T);
+    ctx.strokeStyle = th.d; ctx.lineWidth = 1;
+    if (h % 3 === 0) { const bx = px + h % 22 + 3, by = py + (h >> 4) % 20 + 6; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 2, by - 5); ctx.moveTo(bx + 2, by); ctx.lineTo(bx + 3, by - 4); ctx.stroke(); }
+    if (map[y][x]) {
+      if (th.wall) {
+        ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(px + T/2, py + T - 4, 11, 4, 0, 0, 7); ctx.fill();
+        ctx.fillText(th.wall[h % th.wall.length], px + T/2, py + T/2 + 1);
+      }
+      else {
+        ctx.fillStyle = "#2e2c36"; ctx.fillRect(px, py, T, T);
+        ctx.fillStyle = "#5a5664"; ctx.fillRect(px + 1, py + 1, T/2 - 2, T/2 - 2); ctx.fillRect(px + T/2 + 1, py + T/2 + 1, T/2 - 2, T/2 - 2);
+        ctx.fillStyle = "#47434f"; ctx.fillRect(px + T/2 + 1, py + 1, T/2 - 2, T/2 - 2); ctx.fillRect(px + 1, py + T/2 + 1, T/2 - 2, T/2 - 2);
+      }
+    }
+  }
+  ents.forEach(e => {
+    const px = e.x * T + T/2, py = e.y * T + T/2;
+    if (e.t === "trap") {
+      ctx.fillStyle = "#b0b4bb";
+      for (let k = -1; k <= 1; k += 2) { ctx.beginPath(); ctx.moveTo(px + k*6 - 4, py + 6); ctx.lineTo(px + k*6, py - 5); ctx.lineTo(px + k*6 + 4, py + 6); ctx.fill(); }
+      return;
+    }
+    ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.beginPath(); ctx.ellipse(px, py + 9, 9, 3, 0, 0, 7); ctx.fill();
+    const bob = MON[e.t] ? Math.sin(t / 280 + e.x) * 1.5 : 0;
+    if (e.t === "portal" && G.runes >= th.need) { ctx.shadowColor = "#7ff"; ctx.shadowBlur = 14; }
+    ctx.font = ((e.t === "boss" ? T : T - 8)) + "px serif";
+    ctx.fillText(MON[e.t] ? MON[e.t].e : ICON[e.t], px, py + 1 + bob);
+    ctx.shadowBlur = 0;
+  });
+  ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(G.x * T + T/2, G.y * T + T - 4, 10, 3.5, 0, 0, 7); ctx.fill();
+  knight(G.x * T + T/2, G.y * T + T/2 + 1, Math.sin(t / 220), G.face || 1, performance.now() - (G.mv || 0) < 180 ? Math.sin(t / 60) * 3 : 0);
+  if (th.fog) {
+    const cx = G.x * T + T/2, cy = G.y * T + T/2, r = th.fog * T * (1 + .03 * Math.sin(t / 150));
+    const g = ctx.createRadialGradient(cx, cy, r * .45, cx, cy, r);
+    g.addColorStop(0, "rgba(0,0,10,0)"); g.addColorStop(1, "rgba(0,0,10,.95)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+  }
+  ctx.fillStyle = TINT[lv] || "rgba(0,0,0,0)"; ctx.fillRect(0, 0, cv.width, cv.height);
+  const lx = G.x * T + T/2, ly = G.y * T + T/2;
+  ctx.globalCompositeOperation = "lighter";
+  const lg = ctx.createRadialGradient(lx, ly, 2, lx, ly, 5 * T * (1 + .04 * Math.sin(t / 130)));
+  lg.addColorStop(0, "rgba(255,170,70,.22)"); lg.addColorStop(1, "rgba(255,170,70,0)");
+  ctx.fillStyle = lg; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.globalCompositeOperation = "source-over";
+  const vg = ctx.createRadialGradient(cv.width/2, cv.height/2, cv.height * .35, cv.width/2, cv.height/2, cv.width * .62);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.45)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, cv.width, cv.height);
+  fx = fx.filter(q => q.life-- > 0);
+  fx.forEach(q => {
+    ctx.fillStyle = q.col;
+    if (q.p) { q.x += q.vx; q.y += q.vy; ctx.fillRect(q.x, q.y, 3, 3); }
+    else { q.y -= .6; ctx.font = "bold 15px sans-serif"; ctx.fillText(q.txt, q.x, q.y); }
+  });
+}
+(function loop(t) { draw(t); requestAnimationFrame(loop); })(0);
+
+/* ---------- Interface ---------- */
+function hud() {
+  $("lvl").textContent = `Niveau ${lv + 1}/${LV.length} — ${th.n}`;
+  $("hud").innerHTML = `<span>❤️ ${G.hp}/${G.max}</span><span>⚔️ ${G.atk}</span><span>🛡️ ${G.def}</span><span>💰 ${G.gold}</span><span>🧪 ${G.pot}</span><span>🔮 ${G.runes}/${th.need}</span>`;
+}
+function say(s) { $("log").textContent = s; }
+function modal(icon, text, label, fn) {
+  busy = true;
+  $("mi").textContent = icon; $("mt").textContent = text; $("mb").textContent = label;
+  $("mb").onclick = () => { $("md").classList.remove("on"); busy = false; fn(); };
+  $("md").classList.add("on");
+}
+
+/* ---------- Déplacements ---------- */
+function move(dx, dy) {
+  if (busy || f) return;
+  const nx = G.x + dx, ny = G.y + dy;
+  if (map[ny][nx]) return;
+  const e = ents.find(o => o.x === nx && o.y === ny);
+  if (e && e.t !== "trap") interact(e);
+  else {
+    G.x = nx; G.y = ny; G.face = dx || G.face || 1; G.mv = performance.now(); SFX.step();
+    if (e) {
+      ents.splice(ents.indexOf(e), 1);
+      const d = 2 + lv + rand(3); G.hp -= d;
+      say(`⚠️ Piège ! Tu perds ${d} ❤️.`); pop(G.x, G.y, "-" + d, "#ff5252"); burst(G.x, G.y, "#b71c1c"); SFX.hurt(); shake();
+      hud(); if (G.hp <= 0) return finish(false);
+    }
+  }
+  hud();
+}
+
+function interact(e) {
+  const rm = () => { ents.splice(ents.indexOf(e), 1); burst(e.x, e.y, "#ffd54f"); SFX.pick(); };
+  if (e.t === "sage") {
+    G.sage++;
+    say(G.runes >= th.need
+      ? "🧙 Les runes brillent, le chemin est libre. Courage, chevalier !"
+      : G.sage === 1
+        ? `🧙 ${th.need} runes 🔮 dorment dans les coffres 🧰, mais pas tous… Méfie-toi des pièges au sol.`
+        : `🧙 Il te manque ${th.need - G.runes} rune(s).`);
+  } else if (e.t === "shop") {
+    SFX.pick(); openShop();
+  } else if (e.t === "potion") {
+    G.pot++; rm(); say("Tu ramasses une potion 🧪.");
+  } else if (e.t === "chest") {
+    rm();
+    if (e.loot === "rune") { G.runes++; say(`🔮 Une rune lumineuse ! (${G.runes}/${th.need})`); }
+    else if (e.loot === "sword") { G.atk += 3; say("🗡️ Une épée enchantée ! Attaque +3."); }
+    else if (e.loot === "shield") { G.def += 2; say("🛡️ Un bouclier ! Défense +2."); }
+    else if (e.loot === "potion") { G.pot += 2; say("🧪 Deux potions !"); }
+    else { G.gold += 30; say("💰 30 pièces d'or !"); }
+  } else if (e.t === "portal") {
+    if (G.runes < th.need) say(`🌀 Le portail est scellé : il faut ${th.need} runes 🔮.`);
+    else win();
+  } else if (e.t === "jayne") {
+    finish(true);
+  } else if (e.t === "boss" && G.runes < th.need) {
+    say(`🐉 Un sceau magique protège le dragon. Il faut ${th.need} runes 🔮 !`);
+  } else {
+    f = { e, cd: 0 };
+    $("fl").textContent = "Le combat commence !";
+    $("fight").classList.add("on"); fightUI();
+  }
+}
+
+function win() {
+  SFX.win();
+  G.max += 10; G.hp = Math.min(G.max, G.hp + Math.round(G.max * .6)); G.atk++; G.pot++;
+  modal("🌀", `Niveau ${lv + 1} terminé !\n\n+10 ❤️ max, +1 ⚔️, +1 🧪\nLe niveau suivant sera bien plus difficile…`, "Niveau suivant", () => startLevel(lv + 1));
+}
+
+/* ---------- Combat ---------- */
+function fightUI() {
+  const e = f.e, m = MON[e.t];
+  $("fe").textContent = m.e;
+  $("fn").textContent = `${m.n} — ${Math.max(0, e.hp)}/${e.mx}`;
+  $("fb").style.width = Math.max(0, e.hp / e.mx * 100) + "%";
+  $("fh").textContent = `❤️ Flo : ${G.hp}/${G.max}   🧪 ${G.pot}`;
+  $("bs").disabled = f.cd > 0; $("bp").disabled = !G.pot; $("bf").disabled = e.t === "boss";
+  $("bs").textContent = f.cd > 0 ? `⚡ Spécial (${f.cd})` : "⚡ Spécial";
+}
+
+function act(a) {
+  if (!f || busy) return;
+  const e = f.e, m = MON[e.t], s = e.t === "boss" ? 1 : sc();
+  let log = "";
+  if (a === "atk" || a === "sp") {
+    if (a === "sp" && f.cd > 0) return;
+    let d = G.atk + rand(4);
+    if (a === "sp") { d *= 2; f.cd = 4; }
+    e.hp -= d; SFX.hit(); log = `Tu infliges ${d} dégâts. `;
+  } else if (a === "pot") {
+    if (!G.pot) return;
+    G.pot--; G.hp = Math.min(G.max, G.hp + 20); log = "Tu bois une potion (+20 ❤️). ";
+  } else {
+    if (Math.random() < .5) { endFight(); say("Tu t'esquives !"); hud(); return; }
+    log = "La fuite échoue ! ";
+  }
+  if (e.hp <= 0) {
+    ents.splice(ents.indexOf(e), 1);
+    G.gold += m.g; G.hp = Math.min(G.max, G.hp + 3);
+    endFight(); hud();
+    if (e.t === "boss") {
+      ents.push({ t:"jayne", x:e.x, y:e.y, hp:0, mx:0 });
+      say("🐉 Le dragon s'effondre… La cage s'ouvre : Jayne est libre ! Va la rejoindre 👸");
+    } else say(`Victoire contre ${m.n} ! +${m.g} 💰`);
+    return;
+  }
+  let d = Math.round((m.a[0] + rand(m.a[1] - m.a[0] + 1)) * s);
+  if (m.k && Math.random() < .25) { d *= 2; log += "Coup critique ! "; }
+  d = Math.max(1, d - G.def); G.hp -= d; SFX.hurt();
+  log += `${m.n} t'inflige ${d} dégâts.`;
+  if (m.v) { e.hp = Math.min(e.mx, e.hp + Math.ceil(d / 2)); log += " Il draine ta vie !"; }
+  if (f.cd > 0) f.cd--;
+  hud();
+  $("fc").classList.remove("shake"); void $("fc").offsetWidth; $("fc").classList.add("shake");
+  if (G.hp <= 0) { endFight(); return finish(false); }
+  $("fl").textContent = log; fightUI();
+}
+
+function endFight() { f = null; $("fight").classList.remove("on"); }
+
+function finish(win) {
+  win ? SFX.win() : SFX.lose();
+  modal(win ? "👸" : "💀",
+    win ? `Jayne est libre ! Le Chevalier Noir l'emmène loin du dragon, sous les acclamations du royaume.\n\nOr total : ${G.gold} 💰\nBravo, Flo !`
+        : `Flo est tombé au niveau ${lv + 1}… Mais le royaume a encore besoin de lui.`,
+    "Rejouer", newGame);
+}
+
+$("ba").onclick = () => act("atk");
+$("bs").onclick = () => act("sp");
+$("bp").onclick = () => act("pot");
+$("bf").onclick = () => act("flee");
+document.querySelectorAll("#pad button").forEach(b =>
+  b.addEventListener("click", () => move(...b.dataset.d.split(",").map(Number))));
+document.addEventListener("keydown", e => {
+  const k = { ArrowUp:[0,-1], w:[0,-1], z:[0,-1], ArrowDown:[0,1], s:[0,1], ArrowLeft:[-1,0], a:[-1,0], q:[-1,0], ArrowRight:[1,0], d:[1,0] }[e.key];
+  if (k) { e.preventDefault(); move(...k); }
+});
+
+const GOODS = [
+  ["🧪 Potion", 15, () => G.pot++],
+  ["⚔️ Épée +2", 45, () => G.atk += 2],
+  ["🛡️ Armure +2", 45, () => G.def += 2],
+  ["❤️ Vie max +10", 35, () => { G.max += 10; G.hp += 10; }]
+];
+function openShop() { busy = true; $("sh").classList.add("on"); shopUI(); }
+function shopUI() {
+  $("sg").textContent = `💰 ${G.gold}`; $("sl").innerHTML = "";
+  GOODS.forEach(([n, pr, fn]) => {
+    const b = document.createElement("button");
+    b.textContent = `${n} — ${pr}💰`; b.disabled = G.gold < pr;
+    b.onclick = () => { G.gold -= pr; fn(); SFX.buy(); hud(); shopUI(); };
+    $("sl").appendChild(b);
+  });
+}
+$("sx").onclick = () => { $("sh").classList.remove("on"); busy = false; };
+$("mu").onclick = () => { mute = !mute; $("mu").textContent = mute ? "🔇" : "🔊"; };
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+newGame();
+</script>
+</body>
+</html>
